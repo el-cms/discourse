@@ -90,6 +90,16 @@ module ApplicationHelper
     request.env["HTTP_ACCEPT_ENCODING"] =~ /gzip/
   end
 
+  def generate_import_map(plugin_assets)
+    imports =
+      plugin_assets
+        .filter { it[:importmap_name] }
+        .map { [it[:importmap_name], script_asset_path(it[:name])] }
+        .to_h
+
+    JSON.pretty_generate({ imports: }).html_safe
+  end
+
   def script_asset_path(script)
     path = ActionController::Base.helpers.asset_path("#{script}.js")
 
@@ -113,16 +123,17 @@ module ApplicationHelper
         path = "#{resolved_s3_asset_cdn_url}#{path}"
       end
 
-      # assets needed for theme testing are not compressed because they take a fair
-      # amount of time to compress (+30 seconds) during rebuilds/deploys when the
-      # vast majority of sites will never need them, so it makes more sense to serve
-      # them uncompressed instead of making everyone's rebuild/deploy take +30 more
-      # seconds.
-      if !script.start_with?("discourse/tests/")
-        if is_brotli_req?
-          path = path.gsub(/\.([^.]+)\z/, '.br.\1')
-        elsif is_gzip_req?
-          path = path.gsub(/\.([^.]+)\z/, '.gz.\1')
+      if is_brotli_req?
+        if path.include?("/assets/js/")
+          path = path.sub("/assets/js/", "/assets/br/")
+        else
+          path = path.sub(/\.([^.]+)\z/, '.br.\1')
+        end
+      elsif is_gzip_req?
+        if path.include?("/assets/js/")
+          path = path.sub("/assets/js/", "/assets/gz/")
+        else
+          path = path.sub(/\.([^.]+)\z/, '.gz.\1')
         end
       end
     end
@@ -130,7 +141,7 @@ module ApplicationHelper
     path
   end
 
-  def preload_script(script)
+  def preload_script(script, attrs: {})
     scripts = []
 
     if chunks = EmberCli.script_chunks[script]
@@ -142,20 +153,24 @@ module ApplicationHelper
     scripts
       .map do |name|
         path = script_asset_path(name)
-        preload_script_url(path, entrypoint: script)
+        preload_script_url(path, entrypoint: script, attrs: attrs)
       end
       .join("\n")
       .html_safe
   end
 
-  def preload_script_url(url, entrypoint: nil, type_module: false)
+  def preload_script_url(url, entrypoint: nil, type_module: false, attrs: nil)
     entrypoint_attribute = entrypoint ? "data-discourse-entrypoint=\"#{entrypoint}\"" : ""
     nonce_attribute = "nonce=\"#{csp_nonce_placeholder}\""
+
+    extra_attrs =
+      attrs&.map { |k, v| "#{ERB::Util.html_escape(k)}=\"#{ERB::Util.html_escape(v)}\"" }&.join(" ")
+    extra_attrs = " #{extra_attrs}" if extra_attrs.present?
 
     add_resource_preload_list(url, "script")
 
     <<~HTML.html_safe
-      <script #{type_module ? 'type="module"' : "defer"} src="#{url}" #{entrypoint_attribute} #{nonce_attribute}></script>
+      <script #{type_module ? 'type="module"' : "defer"} src="#{url}" #{entrypoint_attribute}#{extra_attrs} #{nonce_attribute}></script>
     HTML
   end
 
@@ -354,9 +369,17 @@ module ApplicationHelper
 
     if opts[:read_time] && opts[:read_time] > 0 && opts[:like_count] && opts[:like_count] > 0
       result << tag(:meta, name: "twitter:label1", value: I18n.t("reading_time"))
-      result << tag(:meta, name: "twitter:data1", value: "#{opts[:read_time]} mins 🕑")
+      result << tag(
+        :meta,
+        name: "twitter:data1",
+        value: I18n.t("reading_time_minutes", count: opts[:read_time]),
+      )
       result << tag(:meta, name: "twitter:label2", value: I18n.t("likes"))
-      result << tag(:meta, name: "twitter:data2", value: "#{opts[:like_count]} ❤")
+      result << tag(
+        :meta,
+        name: "twitter:data2",
+        value: I18n.t("likes_count", count: opts[:like_count]),
+      )
     end
 
     if opts[:published_time]
@@ -666,7 +689,11 @@ module ApplicationHelper
   def scheme_id
     return @scheme_id if defined?(@scheme_id)
 
-    return user_scheme_id if user_scheme_id
+    if user_scheme_id
+      return user_scheme_id unless theme_limits_color_schemes?
+      return user_scheme_id if ColorScheme.exists?(id: user_scheme_id, theme_id: theme_id)
+    end
+
     return if theme_id.blank?
 
     @scheme_id = Theme.where(id: theme_id).pick(:color_scheme_id)
@@ -679,8 +706,23 @@ module ApplicationHelper
   end
 
   def dark_scheme_id
-    user_dark_scheme_id ||
-      (theme_id ? Theme.find_by_id(theme_id) : Theme.find_default)&.dark_color_scheme_id || -1
+    if user_dark_scheme_id
+      return user_dark_scheme_id unless theme_limits_color_schemes?
+      return user_dark_scheme_id if ColorScheme.exists?(id: user_dark_scheme_id, theme_id: theme_id)
+    end
+
+    theme = theme_id ? Theme.find_by_id(theme_id) : Theme.find_default
+    dark_id = theme&.dark_color_scheme_id
+    return dark_id if dark_id.present?
+    return theme&.color_scheme_id if theme_limits_color_schemes?
+    -1
+  end
+
+  def theme_limits_color_schemes?
+    return @theme_limits_color_schemes if defined?(@theme_limits_color_schemes)
+    @theme_limits_color_schemes =
+      theme_id.present? &&
+        ThemeModifierSet.exists?(theme_id: theme_id, only_theme_color_schemes: true)
   end
 
   def current_homepage
@@ -690,6 +732,38 @@ module ApplicationHelper
   def build_plugin_html(name, **kwargs)
     return "" unless allow_plugins?
     DiscoursePluginRegistry.build_html(name, controller, **kwargs) || ""
+  end
+
+  def crawler_topic_container_schema(topic)
+    tag.attributes(
+      DiscoursePluginRegistry.apply_modifier(
+        :topic_crawler_container_schema,
+        { itemscope: true, itemtype: "http://schema.org/DiscussionForumPosting" },
+        topic,
+      ),
+    )
+  end
+
+  def crawler_topic_main_entity_schema(topic)
+    tag.attributes(
+      DiscoursePluginRegistry.apply_modifier(:topic_crawler_main_entity_schema, {}, topic),
+    ).presence
+  end
+
+  def crawler_post_schema(post, topic)
+    default = {
+      itemprop: "comment",
+      itemscope: true,
+      itemtype: "http://schema.org/Comment",
+    } unless post.is_first_post?
+    tag.attributes(
+      DiscoursePluginRegistry.apply_modifier(
+        :topic_crawler_post_schema,
+        default || {},
+        post,
+        topic,
+      ),
+    )
   end
 
   # If there is plugin HTML return that, otherwise yield to the template

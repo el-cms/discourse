@@ -1,12 +1,13 @@
 /* eslint-disable ember/no-classic-components */
 import Component from "@ember/component";
-import { sort } from "@ember/object/computed";
+import { computed } from "@ember/object";
 import { tagName } from "@ember-decorators/component";
 import CategoryTitleLink from "discourse/components/category-title-link";
 import concatClass from "discourse/helpers/concat-class";
 import icon from "discourse/helpers/d-icon";
 import discourseTag from "discourse/helpers/discourse-tag";
-import discourseComputed from "discourse/lib/decorators";
+import { arraySortedByProperties } from "discourse/lib/array-tools";
+import { slugify } from "discourse/lib/utilities";
 import Category from "discourse/models/category";
 import { i18n } from "discourse-i18n";
 
@@ -14,32 +15,36 @@ import { i18n } from "discourse-i18n";
 export default class TagList extends Component {
   isPrivateMessage = false;
 
-  @sort("tags", "sortProperties") sortedTags;
-
-  @discourseComputed("titleKey")
-  title(titleKey) {
-    return titleKey && i18n(titleKey);
+  @computed("tags", "sortProperties")
+  get sortedTags() {
+    return arraySortedByProperties(this.tags, this.sortProperties);
   }
 
-  @discourseComputed("categoryId")
-  category(categoryId) {
-    return categoryId && Category.findById(categoryId);
+  @computed("titleKey")
+  get title() {
+    return this.titleKey && i18n(this.titleKey);
   }
 
-  @discourseComputed("category.fullSlug")
-  categoryClass(slug) {
-    return slug && `tag-list-${slug}`;
+  @computed("categoryId")
+  get category() {
+    return this.categoryId && Category.findById(this.categoryId);
   }
 
-  @discourseComputed("tagGroupName")
-  tagGroupNameClass(groupName) {
-    if (groupName) {
-      groupName = groupName
-        .replace(/\s+/g, "-")
-        .replace(/[!\"#$%&'\(\)\*\+,\.\/:;<=>\?\@\[\\\]\^`\{\|\}~]/g, "")
-        .toLowerCase();
-      return groupName && `tag-group-${groupName}`;
+  @computed("category.fullSlug")
+  get categoryClass() {
+    return this.category?.fullSlug && `tag-list-${this.category?.fullSlug}`;
+  }
+
+  @computed("tagGroupName")
+  get tagGroupNameSlug() {
+    if (this.tagGroupName) {
+      return slugify(this.tagGroupName);
     }
+  }
+
+  @computed("tagGroupNameSlug")
+  get tagGroupNameClass() {
+    return this.tagGroupNameSlug && `tag-group-${this.tagGroupNameSlug}`;
   }
 
   <template>
@@ -59,7 +64,11 @@ export default class TagList extends Component {
         <CategoryTitleLink @category={{this.category}} />
       {{/if}}
       {{#if this.tagGroupName}}
-        <h3>{{this.tagGroupName}}</h3>
+        <h3 id={{this.tagGroupNameSlug}}><a
+            href="#{{this.tagGroupNameSlug}}"
+            class="anchor"
+            aria-label={{i18n "post.heading_anchor"}}
+          ></a>{{this.tagGroupName}}</h3>
       {{/if}}
       {{#each this.sortedTags as |tag|}}
         <div class="tag-box">

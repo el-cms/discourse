@@ -1,21 +1,29 @@
 import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
+import { registerDestructor } from "@ember/destroyable";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
-import { service } from "@ember/service";
 import concatClass from "discourse/helpers/concat-class";
 import icon from "discourse/helpers/d-icon";
 import { bind } from "discourse/lib/decorators";
+import { isDocumentRTL } from "discourse/lib/text-direction";
 import onResize from "discourse/modifiers/on-resize";
 
 export default class HorizontalOverflowNav extends Component {
-  @service site;
-
   @tracked hasScroll;
   @tracked hideRightScroll = false;
   @tracked hideLeftScroll = true;
   scrollInterval;
+
+  @bind
+  setup(element) {
+    this.scrollToActive(element);
+
+    const observer = new MutationObserver(() => this.watchScroll(element));
+    observer.observe(element, { childList: true });
+    registerDestructor(this, () => observer.disconnect());
+  }
 
   @bind
   scrollToActive(element) {
@@ -30,10 +38,6 @@ export default class HorizontalOverflowNav extends Component {
 
   @bind
   onResize(entries) {
-    if (this.site.mobileView) {
-      return;
-    }
-
     const element = entries[0].target;
     this.watchScroll(element);
     this.hasScroll = element.scrollWidth > element.offsetWidth;
@@ -46,10 +50,6 @@ export default class HorizontalOverflowNav extends Component {
 
   @bind
   onScroll(event) {
-    if (this.site.mobileView) {
-      return;
-    }
-
     this.watchScroll(event.target);
   }
 
@@ -59,26 +59,34 @@ export default class HorizontalOverflowNav extends Component {
     // Check if the content overflows
     this.hasScroll = scrollWidth > offsetWidth;
 
-    // Ensure the right arrow disappears only when fully scrolled
-    if (scrollWidth - scrollLeft - offsetWidth <= 2) {
+    if (!this.hasScroll) {
+      this.hideLeftScroll = true;
       this.hideRightScroll = true;
       clearInterval(this.scrollInterval);
-    } else {
-      this.hideRightScroll = false;
+      return;
     }
 
-    // Ensure the left arrow disappears only when fully scrolled to the start
-    if (scrollLeft <= 2) {
-      this.hideLeftScroll = true;
-      clearInterval(this.scrollInterval);
+    const atStart = Math.abs(scrollLeft) <= 2;
+    const atEnd = scrollWidth - Math.abs(scrollLeft) - offsetWidth <= 2;
+
+    // Buttons stay in physical positions (rtl:ignore in CSS), but in RTL
+    // the scroll direction is reversed, so swap which button hides
+    if (isDocumentRTL()) {
+      this.hideLeftScroll = atEnd;
+      this.hideRightScroll = atStart;
     } else {
-      this.hideLeftScroll = false;
+      this.hideLeftScroll = atStart;
+      this.hideRightScroll = atEnd;
+    }
+
+    if (atStart || atEnd) {
+      clearInterval(this.scrollInterval);
     }
   }
 
   @bind
   scrollDrag(event) {
-    if (this.site.mobileView || !this.hasScroll) {
+    if (!this.hasScroll) {
       return;
     }
 
@@ -160,7 +168,7 @@ export default class HorizontalOverflowNav extends Component {
       <ul
         {{onResize this.onResize}}
         {{on "scroll" this.onScroll}}
-        {{didInsert this.scrollToActive}}
+        {{didInsert this.setup}}
         {{on "mousedown" this.scrollDrag}}
         class="nav-pills action-list {{@className}}"
         ...attributes

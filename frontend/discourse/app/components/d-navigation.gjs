@@ -1,8 +1,7 @@
 /* eslint-disable ember/no-classic-components */
-import { tracked } from "@glimmer/tracking";
 import Component from "@ember/component";
 import { hash } from "@ember/helper";
-import { action } from "@ember/object";
+import { action, computed } from "@ember/object";
 import { dependentKeyCompat } from "@ember/object/compat";
 import { service } from "@ember/service";
 import { tagName } from "@ember-decorators/component";
@@ -17,13 +16,12 @@ import TagInfoButton from "discourse/components/tag-info-button";
 import TagNotificationsTracking from "discourse/components/tag-notifications-tracking";
 import TopicDismissButtons from "discourse/components/topic-dismiss-buttons";
 import lazyHash from "discourse/helpers/lazy-hash";
-import { setting } from "discourse/lib/computed";
-import discourseComputed from "discourse/lib/decorators";
 import { filterTypeForMode } from "discourse/lib/filter-mode";
 import { NotificationLevels } from "discourse/lib/notification-levels";
 import { applyValueTransformer } from "discourse/lib/transformer";
 import NavItem from "discourse/models/nav-item";
 import CategoriesAdminDropdown from "discourse/select-kit/components/categories-admin-dropdown";
+import TagCategoryAdminDropdown from "discourse/select-kit/components/tag-category-admin-dropdown";
 import { and, gt } from "discourse/truth-helpers";
 
 @tagName("")
@@ -33,12 +31,9 @@ export default class DNavigation extends Component {
   @service siteSettings;
   @service currentUser;
 
-  @tracked filterMode;
-
-  @setting("fixed_category_positions") fixedCategoryPositions;
-
-  get canEditTags() {
-    return this.currentUser?.canEditTags;
+  @computed("siteSettings.fixed_category_positions")
+  get fixedCategoryPositions() {
+    return this.siteSettings.fixed_category_positions;
   }
 
   get createTopicLabel() {
@@ -72,8 +67,8 @@ export default class DNavigation extends Component {
 
   // Should be a `readOnly` instead but some themes/plugins still pass
   // the `categories` property into this component
-  @discourseComputed()
-  categories() {
+  @computed()
+  get categories() {
     let categories = this.site.categoriesList;
 
     if (!this.siteSettings.allow_uncategorized_topics) {
@@ -92,13 +87,13 @@ export default class DNavigation extends Component {
     return categories;
   }
 
-  @discourseComputed("category")
-  showCategoryNotifications(category) {
-    return category && this.currentUser;
+  @computed("category")
+  get showCategoryNotifications() {
+    return this.category && this.currentUser;
   }
 
-  @discourseComputed("category.notification_level")
-  categoryNotificationLevel(notificationLevel) {
+  @computed("category.notification_level")
+  get categoryNotificationLevel() {
     if (
       this.currentUser?.indirectly_muted_category_ids?.includes(
         this.category.id
@@ -106,37 +101,50 @@ export default class DNavigation extends Component {
     ) {
       return NotificationLevels.MUTED;
     } else {
-      return notificationLevel;
+      return this.category?.notification_level;
     }
   }
 
   // don't show tag notification menu on tag intersections
-  @discourseComputed("tagNotification", "additionalTags")
-  showTagNotifications(tagNotification, additionalTags) {
-    return tagNotification && !additionalTags;
+  @computed("tagNotification", "additionalTags")
+  get showTagNotifications() {
+    return this.tagNotification && !this.additionalTags;
   }
 
-  @discourseComputed("category", "createTopicDisabled")
-  categoryReadOnlyBanner(category, createTopicDisabled) {
-    if (category && this.currentUser && createTopicDisabled) {
-      return category.read_only_banner;
+  @computed("category", "createTopicDisabled")
+  get categoryReadOnlyBanner() {
+    if (this.category && this.currentUser && this.createTopicDisabled) {
+      return this.category.read_only_banner;
     }
   }
 
-  @discourseComputed("category.can_edit")
-  showCategoryEdit(canEdit) {
-    return canEdit;
+  @computed("category.can_edit")
+  get showCategoryEdit() {
+    return this.category?.can_edit;
   }
 
-  @discourseComputed("additionalTags", "category", "tag.name")
-  showToggleInfo(additionalTags, category, tagId) {
-    if (this.siteSettings.experimental_tag_settings_page) {
-      return this.currentUser;
-    }
-    return !additionalTags && !category && tagId !== "none";
+  @computed("tag", "tag.name", "additionalTags", "currentUser.canEditTags")
+  get showTagEdit() {
+    return (
+      this.tag &&
+      this.tag.name !== "none" &&
+      !this.additionalTags &&
+      this.currentUser?.canEditTags
+    );
   }
 
-  @discourseComputed(
+  @computed(
+    "category.can_edit",
+    "tag",
+    "tag.name",
+    "additionalTags",
+    "currentUser.canEditTags"
+  )
+  get showCombinedAdminDropdown() {
+    return this.category?.can_edit && this.showTagEdit;
+  }
+
+  @computed(
     "filterType",
     "category",
     "noSubcategories",
@@ -144,27 +152,20 @@ export default class DNavigation extends Component {
     "router.currentRoute.queryParams",
     "skipCategoriesNavItem"
   )
-  navItems(
-    filterType,
-    category,
-    noSubcategories,
-    tag,
-    currentRouteQueryParams,
-    skipCategoriesNavItem
-  ) {
-    return NavItem.buildList(category, {
-      filterType,
-      noSubcategories,
-      currentRouteQueryParams,
-      tag,
+  get navItems() {
+    return NavItem.buildList(this.category, {
+      filterType: this.filterType,
+      noSubcategories: this.noSubcategories,
+      currentRouteQueryParams: this.router?.currentRoute?.queryParams,
+      tag: this.tag,
       siteSettings: this.siteSettings,
-      skipCategoriesNavItem,
+      skipCategoriesNavItem: this.skipCategoriesNavItem,
     });
   }
 
-  @discourseComputed("filterType")
-  notCategoriesRoute(filterType) {
-    return filterType !== "categories";
+  @computed("filterType")
+  get notCategoriesRoute() {
+    return this.filterType !== "categories";
   }
 
   @action
@@ -204,13 +205,25 @@ export default class DNavigation extends Component {
   }
 
   @action
-  clickCreateTopicButton() {
-    this.createTopic();
+  handleTagCategoryAdmin(actionId) {
+    switch (actionId) {
+      case "editCategory":
+        this.editCategory();
+        break;
+      case "editTag":
+        this.router.transitionTo(
+          "tag.edit.tab",
+          this.tag.slug,
+          this.tag.id,
+          "general"
+        );
+        break;
+    }
   }
 
   @action
-  clickTagInfo() {
-    this.toggleInfo();
+  clickCreateTopicButton() {
+    this.createTopic();
   }
 
   <template>
@@ -278,32 +291,25 @@ export default class DNavigation extends Component {
         {{/if}}
       {{/if}}
 
-      {{#if (and this.category this.showCategoryEdit)}}
-        <DButton
-          @action={{this.editCategory}}
-          @icon="wrench"
-          @title="category.edit_title"
-          class="btn-default edit-category"
+      {{#if this.showCombinedAdminDropdown}}
+        <TagCategoryAdminDropdown
+          @category={{this.category}}
+          @tag={{this.tag}}
+          @onChange={{this.handleTagCategoryAdmin}}
+          @options={{hash triggerOnChangeOnTab=false}}
         />
-      {{/if}}
+      {{else}}
+        {{#if (and this.category this.showCategoryEdit)}}
+          <DButton
+            @action={{this.editCategory}}
+            @icon="wrench"
+            @title="category.edit_title"
+            class="btn-default edit-category"
+          />
+        {{/if}}
 
-      {{#if this.tag}}
-        {{#if this.showToggleInfo}}
-          {{#if this.siteSettings.experimental_tag_settings_page}}
-            <TagInfoButton
-              @tag={{this.tag}}
-              @currentUser={{this.currentUser}}
-            />
-          {{else}}
-            <DButton
-              @icon={{if this.canEditTags "wrench" "circle-info"}}
-              @ariaLabel={{if this.canEditTags "tagging.edit" "tagging.info"}}
-              @title={{if this.canEditTags "tagging.edit" "tagging.info"}}
-              @action={{this.clickTagInfo}}
-              id="show-tag-info"
-              class="btn-default"
-            />
-          {{/if}}
+        {{#if this.showTagEdit}}
+          <TagInfoButton @tag={{this.tag}} @currentUser={{this.currentUser}} />
         {{/if}}
       {{/if}}
 

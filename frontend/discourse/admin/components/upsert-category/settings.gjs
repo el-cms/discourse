@@ -3,13 +3,16 @@ import { hash } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import PluginOutlet from "discourse/components/plugin-outlet";
 import RelativeTimePicker from "discourse/components/relative-time-picker";
 import concatClass from "discourse/helpers/concat-class";
 import lazyHash from "discourse/helpers/lazy-hash";
 import withEventValue from "discourse/helpers/with-event-value";
-import { SEARCH_PRIORITIES } from "discourse/lib/constants";
+import {
+  POSTING_REVIEW_GROUP_BASED_MODES,
+  SEARCH_PRIORITIES,
+} from "discourse/lib/constants";
 import getUrl from "discourse/lib/get-url";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import GroupChooser from "discourse/select-kit/components/group-chooser";
@@ -64,24 +67,50 @@ export default class UpsertCategorySettings extends Component {
     return this.args.transientData?.category_setting;
   }
 
-  get requireTopicApproval() {
-    return this.categorySetting?.require_topic_approval;
-  }
-
-  get requireReplyApproval() {
-    return this.categorySetting?.require_reply_approval;
-  }
-
-  get autoCloseBasedOnLastPost() {
-    return this.args.transientData?.auto_close_based_on_last_post;
-  }
-
   get numAutoBumpDaily() {
     return this.categorySetting?.num_auto_bump_daily;
   }
 
   get autoBumpCooldownDays() {
     return this.categorySetting?.auto_bump_cooldown_days;
+  }
+
+  get postingReviewModeOptions() {
+    return [
+      { name: i18n("category.posting_review_modes.no_one"), value: "no_one" },
+      {
+        name: i18n("category.posting_review_modes.everyone"),
+        value: "everyone",
+      },
+      {
+        name: i18n("category.posting_review_modes.everyone_except"),
+        value: "everyone_except",
+      },
+      {
+        name: i18n("category.posting_review_modes.no_one_except"),
+        value: "no_one_except",
+      },
+    ];
+  }
+
+  get topicModeRequiresGroups() {
+    return POSTING_REVIEW_GROUP_BASED_MODES.includes(
+      this.categorySetting?.topic_posting_review_mode
+    );
+  }
+
+  get replyModeRequiresGroups() {
+    return POSTING_REVIEW_GROUP_BASED_MODES.includes(
+      this.categorySetting?.reply_posting_review_mode
+    );
+  }
+
+  get topicPostingReviewGroupIds() {
+    return this.args.transientData?.topic_posting_review_group_ids;
+  }
+
+  get replyPostingReviewGroupIds() {
+    return this.args.transientData?.reply_posting_review_group_ids;
   }
 
   @action
@@ -109,21 +138,6 @@ export default class UpsertCategorySettings extends Component {
   }
 
   @action
-  onRequireTopicApprovalChange(event) {
-    this.#updateCategorySetting("require_topic_approval", event.target.checked);
-  }
-
-  @action
-  onRequireReplyApprovalChange(event) {
-    this.#updateCategorySetting("require_reply_approval", event.target.checked);
-  }
-
-  @action
-  onAutoCloseBasedOnLastPostChange(event) {
-    this.args.form.set("auto_close_based_on_last_post", event.target.checked);
-  }
-
-  @action
   onNumAutoBumpDailyChange(value) {
     this.#updateCategorySetting("num_auto_bump_daily", value);
   }
@@ -131,6 +145,33 @@ export default class UpsertCategorySettings extends Component {
   @action
   onAutoBumpCooldownDaysChange(value) {
     this.#updateCategorySetting("auto_bump_cooldown_days", value);
+  }
+
+  @action
+  onTopicPostingReviewModeChange(value) {
+    this.#updateCategorySetting("topic_posting_review_mode", value);
+    if (!POSTING_REVIEW_GROUP_BASED_MODES.includes(value)) {
+      this.args.form.set("topic_posting_review_group_ids", []);
+    }
+  }
+
+  @action
+  onReplyPostingReviewModeChange(value) {
+    this.#updateCategorySetting("reply_posting_review_mode", value);
+    if (!POSTING_REVIEW_GROUP_BASED_MODES.includes(value)) {
+      this.args.form.set("reply_posting_review_group_ids", []);
+    }
+  }
+
+  @action
+  validatePostingReviewGroups(name, value, { addError }) {
+    if (!value?.length) {
+      const type = name.startsWith("topic") ? "topic" : "reply";
+      addError(name, {
+        title: i18n(`category.require_${type}_approval_for`),
+        message: i18n("category.validations.groups_required"),
+      });
+    }
   }
 
   <template>
@@ -144,10 +185,11 @@ export default class UpsertCategorySettings extends Component {
       <@form.Field
         @name="slug"
         @title={{i18n "category.slug"}}
-        @format="large"
+        @format="max"
+        @type="input"
         as |field|
       >
-        <field.Input
+        <field.Control
           placeholder={{i18n "category.slug_placeholder"}}
           @maxlength="255"
         />
@@ -157,10 +199,11 @@ export default class UpsertCategorySettings extends Component {
         <@form.Field
           @name="position"
           @title={{i18n "category.position"}}
-          @format="large"
+          @format="max"
+          @type="input-number"
           as |field|
         >
-          <field.Input type="number" min="0" />
+          <field.Control min="0" />
         </@form.Field>
       {{/if}}
 
@@ -171,19 +214,21 @@ export default class UpsertCategorySettings extends Component {
           (i18n "category.subcategory_num_featured_topics")
           (i18n "category.num_featured_topics")
         }}
-        @format="large"
+        @format="max"
+        @type="input-number"
         as |field|
       >
-        <field.Input type="number" min="1" />
+        <field.Control min="1" />
       </@form.Field>
 
       <@form.Field
         @name="search_priority"
         @title={{i18n "category.search_priority.label"}}
-        @format="large"
+        @format="max"
+        @type="custom"
         as |field|
       >
-        <field.Custom>
+        <field.Control>
           <ComboBox
             @valueProperty="value"
             @id="category-search-priority"
@@ -192,17 +237,18 @@ export default class UpsertCategorySettings extends Component {
             @onChange={{field.set}}
             @options={{hash placementStrategy="absolute"}}
           />
-        </field.Custom>
+        </field.Control>
       </@form.Field>
 
       {{#if this.siteSettings.enable_badges}}
         <@form.Field
           @name="allow_badges"
           @title={{i18n "category.allow_badges_label"}}
-          @format="large"
+          @format="max"
+          @type="checkbox"
           as |field|
         >
-          <field.Checkbox />
+          <field.Control />
         </@form.Field>
       {{/if}}
 
@@ -210,38 +256,42 @@ export default class UpsertCategorySettings extends Component {
         <@form.Field
           @name="topic_featured_link_allowed"
           @title={{i18n "category.topic_featured_link_allowed"}}
-          @format="large"
+          @format="max"
+          @type="checkbox"
           as |field|
         >
-          <field.Checkbox />
+          <field.Control />
         </@form.Field>
       {{/if}}
 
       <@form.Field
         @name="navigate_to_first_post_after_read"
         @title={{i18n "category.navigate_to_first_post_after_read"}}
-        @format="large"
+        @format="max"
+        @type="checkbox"
         as |field|
       >
-        <field.Checkbox />
+        <field.Control />
       </@form.Field>
 
       <@form.Field
         @name="all_topics_wiki"
         @title={{i18n "category.all_topics_wiki"}}
-        @format="large"
+        @format="max"
+        @type="checkbox"
         as |field|
       >
-        <field.Checkbox />
+        <field.Control />
       </@form.Field>
 
       <@form.Field
         @name="allow_unlimited_owner_edits_on_first_post"
         @title={{i18n "category.allow_unlimited_owner_edits_on_first_post"}}
-        @format="large"
+        @format="max"
+        @type="checkbox"
         as |field|
       >
-        <field.Checkbox />
+        <field.Control />
       </@form.Field>
 
       <@form.Section @title={{i18n "category.settings_sections.moderation"}}>
@@ -255,27 +305,89 @@ export default class UpsertCategorySettings extends Component {
           </@form.Container>
         {{/if}}
 
-        <@form.Container>
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              checked={{this.requireTopicApproval}}
-              {{on "change" this.onRequireTopicApprovalChange}}
-            />
-            {{i18n "category.require_topic_approval"}}
-          </label>
-        </@form.Container>
+        <@form.Object @name="category_setting" as |object|>
+          <object.Field
+            @name="topic_posting_review_mode"
+            @title={{i18n "category.require_topic_approval_for"}}
+            @type="custom"
+            as |field|
+          >
+            <field.Control>
+              <ComboBox
+                @valueProperty="value"
+                @content={{this.postingReviewModeOptions}}
+                @value={{field.value}}
+                @onChange={{this.onTopicPostingReviewModeChange}}
+                @options={{hash placementStrategy="absolute"}}
+              />
+            </field.Control>
+          </object.Field>
 
-        <@form.Container>
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              checked={{this.requireReplyApproval}}
-              {{on "change" this.onRequireReplyApprovalChange}}
-            />
-            {{i18n "category.require_reply_approval"}}
-          </label>
-        </@form.Container>
+          {{#if this.topicModeRequiresGroups}}
+            <@form.Field
+              @name="topic_posting_review_group_ids"
+              @title={{i18n "category.require_topic_approval_for"}}
+              @showTitle={{false}}
+              @type="custom"
+              @validate={{this.validatePostingReviewGroups}}
+              as |field|
+            >
+              <field.Control>
+                <GroupChooser
+                  class="posting-review-group-chooser"
+                  @content={{this.site.groups}}
+                  @value={{field.value}}
+                  @onChange={{field.set}}
+                  @options={{hash
+                    none="category.posting_review_groups_placeholder"
+                  }}
+                />
+              </field.Control>
+            </@form.Field>
+          {{/if}}
+        </@form.Object>
+
+        <@form.Object @name="category_setting" as |object|>
+          <object.Field
+            @name="reply_posting_review_mode"
+            @title={{i18n "category.require_reply_approval_for"}}
+            @type="custom"
+            as |field|
+          >
+            <field.Control>
+              <ComboBox
+                @valueProperty="value"
+                @content={{this.postingReviewModeOptions}}
+                @value={{field.value}}
+                @onChange={{this.onReplyPostingReviewModeChange}}
+                @options={{hash placementStrategy="absolute"}}
+              />
+            </field.Control>
+          </object.Field>
+
+          {{#if this.replyModeRequiresGroups}}
+            <@form.Field
+              @name="reply_posting_review_group_ids"
+              @title={{i18n "category.require_reply_approval_for"}}
+              @showTitle={{false}}
+              @type="custom"
+              @validate={{this.validatePostingReviewGroups}}
+              as |field|
+            >
+              <field.Control>
+                <GroupChooser
+                  class="posting-review-group-chooser"
+                  @content={{this.site.groups}}
+                  @value={{field.value}}
+                  @onChange={{field.set}}
+                  @options={{hash
+                    none="category.posting_review_groups_placeholder"
+                  }}
+                />
+              </field.Control>
+            </@form.Field>
+          {{/if}}
+        </@form.Object>
 
         <@form.Container @title={{i18n "category.default_slow_mode"}}>
           <RelativeTimePicker
@@ -292,15 +404,16 @@ export default class UpsertCategorySettings extends Component {
             @hiddenIntervals={{this.hiddenRelativeIntervals}}
             @onChange={{this.onAutoCloseDurationChange}}
           />
-          <label class="checkbox-label">
-            <input
-              type="checkbox"
-              checked={{this.autoCloseBasedOnLastPost}}
-              {{on "change" this.onAutoCloseBasedOnLastPostChange}}
-            />
-            {{i18n "topic.auto_close.based_on_last_post"}}
-          </label>
         </@form.Container>
+
+        <@form.Field
+          @name="auto_close_based_on_last_post"
+          @title={{i18n "topic.auto_close.based_on_last_post"}}
+          @type="checkbox"
+          as |field|
+        >
+          <field.Control />
+        </@form.Field>
 
         <@form.Container @title={{i18n "category.num_auto_bump_daily"}}>
           <input
@@ -328,28 +441,31 @@ export default class UpsertCategorySettings extends Component {
           <@form.Field
             @name="email_in"
             @title={{i18n "category.email_in"}}
-            @format="large"
+            @format="max"
+            @type="input"
             as |field|
           >
-            <field.Input @maxlength="255" />
+            <field.Control @maxlength="255" />
           </@form.Field>
 
           <@form.Field
             @name="email_in_allow_strangers"
             @title={{i18n "category.email_in_allow_strangers"}}
-            @format="large"
+            @format="max"
+            @type="checkbox"
             as |field|
           >
-            <field.Checkbox />
+            <field.Control />
           </@form.Field>
 
           <@form.Field
             @name="mailinglist_mirror"
             @title={{i18n "category.mailinglist_mirror"}}
-            @format="large"
+            @format="max"
+            @type="checkbox"
             as |field|
           >
-            <field.Checkbox />
+            <field.Control />
           </@form.Field>
 
           <PluginOutlet
@@ -359,7 +475,7 @@ export default class UpsertCategorySettings extends Component {
           />
         {{else}}
           <@form.Alert @type="info">
-            {{htmlSafe
+            {{trustHTML
               (i18n
                 "category.email_in_disabled"
                 setting_url=(getUrl
@@ -373,7 +489,11 @@ export default class UpsertCategorySettings extends Component {
 
       <PluginOutlet
         @name="category-custom-settings"
-        @outletArgs={{lazyHash category=@category form=@form}}
+        @outletArgs={{lazyHash
+          category=@category
+          form=@form
+          transientData=@transientData
+        }}
       />
     </@form.Section>
   </template>

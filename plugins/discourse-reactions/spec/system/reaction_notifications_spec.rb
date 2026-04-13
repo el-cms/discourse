@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "Reactions | Notifications", type: :system do
+describe "Reactions | Notifications" do
   fab!(:current_user, :user)
   fab!(:acting_user_1) { Fabricate(:user, name: "Bruce Wayne I") }
   fab!(:acting_user_2) { Fabricate(:user, name: "Bruce Wayne II") }
@@ -76,7 +76,7 @@ describe "Reactions | Notifications", type: :system do
       )
     end
 
-    before { SiteSetting.prioritize_full_name_in_ux = true }
+    before { SiteSetting.prioritize_username_in_ux = false }
 
     it "renders reaction notifications with full names" do
       visit("/")

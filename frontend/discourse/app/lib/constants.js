@@ -26,6 +26,8 @@ export const CATEGORY_STYLE_TYPES = { square: 0, icon: 1, emoji: 2 };
 
 export const CATEGORY_TEXT_COLORS = ["FFFFFF", "000000"];
 
+// NOTE: Group names are changed based on the site's locale, see
+// Group.refresh_automatic_group! for more details
 export const AUTO_GROUPS = {
   everyone: { id: 0, automatic: true, name: "everyone" },
   admins: { id: 1, automatic: true, name: "admins" },
@@ -77,6 +79,11 @@ export const ADMIN_SEARCH_RESULT_TYPES = [
 export const API_KEY_SCOPE_MODES = ["global", "read_only", "granular"];
 
 export const INVITE_DESCRIPTION_MAX_LENGTH = 100;
+
+export const POSTING_REVIEW_GROUP_BASED_MODES = [
+  "everyone_except",
+  "no_one_except",
+];
 
 export const USER_OPTION_COMPOSITION_MODES = { markdown: 0, rich: 1 };
 

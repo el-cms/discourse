@@ -836,6 +836,7 @@ hr:
     read: "pročitano"
     read_write: "čitati/pisati"
     instructions: 'Upravo smo generirali novi korisnički API ključ za korištenje s "%{application_name}", zalijepite sljedeći ključ u svoju aplikaciju:'
+    copied: "Kopirano!"
     otp_description: 'Želite li dopustiti "%{application_name}" pristup ovoj stranici?'
     otp_confirmation:
       confirm_title: Nastavite na %{site_name}
@@ -905,7 +906,9 @@ hr:
         flag: Tip
     visits:
       title: "Posjete korisnika"
-      xaxis: "Dan"
+      xaxis:
+        desktop: "Desktop"
+        mobile: "Mobilni"
       yaxis: "Broj posjeta"
     signups:
       xaxis: "Dan"
@@ -1791,47 +1794,9 @@ hr:
     reviewable_queued_post_revise_and_reject:
       title: "Povratne informacije o vašoj objavi"
       subject_template: "Povratne informacije o vašoj objavi u %{topic_title}"
-      text_body_template: |
-        Pozdrav %{username},
-
-        Pregledali smo vašu objavu u [%{topic_title}](%{topic_url}) i imamo povratne informacije za vas.
-
-        Razlog: %{reason}
-
-        Povratne informacije: %{feedback}
-
-        Možete urediti svoju izvornu objavu u nastavku i ponovno je poslati kako biste unijeli predložene promjene ili odgovoriti na ovu poruku ako imate bilo kakvih pitanja.
-
-        --------
-
-        %{original_post}
-
-        --------
-
-        Hvala,
-        %{site_name} Moderatori
     reviewable_queued_post_revise_and_reject_new_topic:
       title: "Povratne informacije o vašoj temi"
       subject_template: 'Povratne informacije o novoj temi pod nazivom "%{topic_title}"'
-      text_body_template: |
-        Pozdrav %{username},
-
-        Pregledali smo vašu novu temu pod naslovom "%{topic_title}" i imamo povratne informacije za vas.
-
-        Razlog: %{reason}
-
-        Povratne informacije: %{feedback}
-
-        Možete urediti izvornu objavu svoje teme u nastavku i ponovno je poslati kako biste unijeli predložene promjene ili odgovoriti na ovu poruku ako imate bilo kakvih pitanja.
-
-        --------
-
-        %{original_post}
-
-        --------
-
-        Hvala,
-        %{site_name} Moderatori
     post_hidden_again:
       title: "Objava je opet skrivena"
       subject_template: "Objava skrivena zbog prijava članova zajednice, osoblje obaviješteno"
@@ -2750,8 +2715,6 @@ hr:
       help: "Za početak registrirajte novi korisnički račun."
     resend_email:
       title: "Ponovno pošaljite e-poštu za aktivaciju"
-  dev_mode:
-    enter: "Unesi"
   wizard:
     step:
       setup:
@@ -2854,13 +2817,9 @@ hr:
         title: "Da"
       approve_and_unhide:
         title: "Da"
-      no_action_post:
-        title: "Nema akcije"
       delete_post:
         title: "Izbrišite objavu"
         complete: "Post izbrisan"
-      no_action_user:
-        title: "Nema akcije"
       delete_user:
         complete: "Korisnik izbrisan"
   fallback_username: "korisnik"

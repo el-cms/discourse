@@ -7,8 +7,11 @@
 cs:
   js:
     explorer:
+      default_query: "Výchozí"
       or: "nebo"
-      create: "Vytvořit nový"
+      create: "Vytvořit"
+      ai:
+        generate: "Vygenerovat API klíč"
       import:
         label: "Import"
       help:
@@ -21,7 +24,9 @@ cs:
           no: "Ne"
           null_: "Null"
       export: "Export"
+      view: "Zobrazit"
       save: "Uložit změny"
+      undo: "Zahodit změny"
       edit: "Upravit"
       delete: "Smazat"
       download_json: "JSON"

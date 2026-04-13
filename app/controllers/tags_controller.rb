@@ -10,8 +10,6 @@ class TagsController < ::ApplicationController
     Discourse.anonymous_filters.map { |f| :"show_#{f}" }
   end
 
-  before_action :ensure_visible, only: [:show, :info, *show_methods]
-
   requires_login except: [:index, :show, :tag_feed, :search, :info, *show_methods]
 
   skip_before_action :check_xhr, only: [:tag_feed, :show, :index, *show_methods]
@@ -212,6 +210,9 @@ class TagsController < ::ApplicationController
       @list.more_topics_url = construct_url_with(:next, list_opts)
       @list.prev_topics_url = construct_url_with(:prev, list_opts)
       @rss = "tag"
+      @rss_description = "tag"
+      @rss_link = "#{@tag.full_url}.rss" if @tag
+
       @title = I18n.t("rss_by_tag", tag: tag_params.join(" & "))
       @description_meta = Tag.where(name: @tag_name).pick(:description) || @title
 
@@ -288,7 +289,7 @@ class TagsController < ::ApplicationController
 
     previous_tag_name = @tag.name
     @tag.name = DiscourseTagging.clean_tag(new_tag_name) if new_tag_name.present?
-    @tag.description = new_tag_description if new_tag_description.present?
+    @tag.description = new_tag_description if new_tag.has_key?(:description)
 
     if @tag.save
       if @tag.name != previous_tag_name
@@ -518,7 +519,7 @@ class TagsController < ::ApplicationController
   end
 
   def create_synonyms
-    guardian.ensure_can_edit_tag!
+    guardian.ensure_can_edit_tag!(@tag)
 
     # frontend uses form data
     tags_param = params[:tags].try(:values) || params[:tags]
@@ -559,13 +560,21 @@ class TagsController < ::ApplicationController
   private
 
   def fetch_tag(raise_not_found: true)
-    @tag =
-      if params[:tag_id].present?
-        Tag.find_by(id: params[:tag_id])
-      elsif params[:tag_name].present?
-        Tag.find_by_name(params[:tag_name].force_encoding("UTF-8"))
+    if params[:tag_id].present?
+      # Try finding by ID first
+      @tag = Tag.find_by(id: params[:tag_id])
+
+      # For numeric tag names on legacy routes, fallback to finding by name
+      if !@tag
+        @tag = Tag.find_by_name(params[:tag_id])
+        # Track that we found the tag by name, not ID, to avoid redirecting
+        @tag_found_by_name = true if @tag
       end
-    raise Discourse::NotFound if raise_not_found && @tag.nil?
+    elsif params[:tag_name].present?
+      @tag = Tag.find_by_name(params[:tag_name].force_encoding("UTF-8"))
+    end
+
+    raise Discourse::NotFound if @tag ? !guardian.can_see_tag?(@tag) : raise_not_found
     @tag
   end
 
@@ -598,6 +607,8 @@ class TagsController < ::ApplicationController
     return false if request.format.json?
     # intersection routes use tag_name, not tag_slug/tag_id - don't redirect
     return false if params[:additional_tag_names].present?
+    # don't redirect if we found the tag by name (numeric tag name on legacy route)
+    return false if @tag_found_by_name
 
     if params[:tag_id].present?
       # new format - redirect if slug doesn't match
@@ -610,12 +621,6 @@ class TagsController < ::ApplicationController
 
   def ensure_tags_enabled
     raise Discourse::NotFound unless SiteSetting.tagging_enabled?
-  end
-
-  def ensure_visible
-    if DiscourseTagging.hidden_tag_names(guardian).include?(params[:tag_name])
-      raise Discourse::NotFound
-    end
   end
 
   def self.tag_counts_json(tags, guardian)

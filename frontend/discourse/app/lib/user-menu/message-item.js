@@ -1,4 +1,4 @@
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
 import { emojiUnescape } from "discourse/lib/text";
 import UserMenuBaseItem from "discourse/lib/user-menu/base-item";
 import { postUrl } from "discourse/lib/utilities";
@@ -35,7 +35,7 @@ export default class UserMenuMessageItem extends UserMenuBaseItem {
   }
 
   get label() {
-    if (!this.siteSettings.prioritize_full_name_in_ux) {
+    if (this.siteSettings.prioritize_username_in_ux) {
       return this.message.last_poster_username;
     }
 
@@ -43,7 +43,7 @@ export default class UserMenuMessageItem extends UserMenuBaseItem {
   }
 
   get description() {
-    return htmlSafe(emojiUnescape(this.message.fancy_title));
+    return trustHTML(emojiUnescape(this.message.fancy_title));
   }
 
   get topicId() {

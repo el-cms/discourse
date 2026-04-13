@@ -2,12 +2,15 @@
 
 module Jobs
   class LocalizePosts < ::Jobs::Base
-    cluster_concurrency 1
     sidekiq_options retry: false
+
+    REDIS_KEY = "discourse-ai:localize_posts:in_progress"
 
     def execute(args)
       limit = args[:limit]
       raise Discourse::InvalidParameters.new(:limit) if limit.blank? || limit <= 0
+
+      offset = args[:offset].to_i
 
       return if !DiscourseAi::Translation.backfill_enabled?
 
@@ -18,7 +21,7 @@ module Jobs
         return
       end
 
-      llm_model = find_llm_model_for_persona(SiteSetting.ai_translation_post_raw_translator_persona)
+      llm_model = find_llm_model_for_agent(SiteSetting.ai_translation_post_raw_translator_agent)
       return if llm_model.blank?
 
       locales = DiscourseAi::Translation.locales
@@ -37,11 +40,13 @@ module Jobs
             .where("posts.locale NOT LIKE '#{base_locale}%'")
             .where("pl.id IS NULL")
             .order(updated_at: :desc)
+            .offset(offset)
             .limit(limit)
 
         next if posts.empty?
 
         posts.each do |post|
+          Discourse.redis.expire(REDIS_KEY, 15.minutes.to_i)
           next unless DiscourseAi::Translation::PostLocalizer.has_relocalize_quota?(post, locale)
 
           begin
@@ -57,17 +62,20 @@ module Jobs
 
         DiscourseAi::Translation::VerboseLogger.log("Translated #{posts.size} posts to #{locale}")
       end
+    ensure
+      remaining = Discourse.redis.decr(REDIS_KEY)
+      Discourse.redis.del(REDIS_KEY) if remaining <= 0
     end
 
     private
 
-    def find_llm_model_for_persona(persona_id)
-      return nil if persona_id.blank?
+    def find_llm_model_for_agent(agent_id)
+      return nil if agent_id.blank?
 
-      persona_klass = AiPersona.find_by_id_from_cache(persona_id)
-      return nil if persona_klass.blank?
+      agent_klass = AiAgent.find_by_id_from_cache(agent_id)
+      return nil if agent_klass.blank?
 
-      DiscourseAi::Translation::BaseTranslator.preferred_llm_model(persona_klass)
+      DiscourseAi::Translation::BaseTranslator.preferred_llm_model(agent_klass)
     end
   end
 end

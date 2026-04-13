@@ -59,9 +59,6 @@ export default class ChatChannel extends Component {
   @service dialog;
   @service siteSettings;
 
-  @tracked sending = false;
-  @tracked showChatQuoteSuccess = false;
-  @tracked includeHeader = true;
   @tracked atBottom = true;
   @tracked uploadDropZone;
   @tracked isScrolling = false;
@@ -763,6 +760,7 @@ export default class ChatChannel extends Component {
       <ChatScrollToBottomArrow
         @onScrollToBottom={{this.scrollToLatestMessage}}
         @isVisible={{this.paneState.hasPendingContentBelow}}
+        @channel={{@channel}}
       />
 
       {{#if this.pane.selectingMessages}}

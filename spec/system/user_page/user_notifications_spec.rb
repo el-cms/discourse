@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-describe "User notifications", type: :system do
+describe "User notifications" do
   fab!(:user) { Fabricate(:user, name: "Awesome Name") }
   let(:user_notifications_page) { PageObjects::Pages::UserNotifications.new }
   let(:user_page) { PageObjects::Pages::User.new }
@@ -85,7 +85,7 @@ describe "User notifications", type: :system do
 
     context "when prioritize_username_in_ux is false" do
       before do
-        SiteSetting.prioritize_full_name_in_ux = true
+        SiteSetting.prioritize_username_in_ux = false
         sign_in(user2)
       end
 

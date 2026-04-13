@@ -95,6 +95,8 @@ en:
         unstar_channel: "Unstar channel"
         close_channel: "Close channel"
         open_channel: "Open channel"
+        open_channel_disabled_archived: "Archived channels cannot be reopened."
+        open_channel_disabled_read_only: "Read-only channels cannot be reopened."
         archive_channel: "Archive channel"
         delete_channel: "Delete channel"
         join_channel: "Join channel"
@@ -313,6 +315,9 @@ en:
         other: "You have %{count} unread discussions"
       scroll_to_bottom: "Scroll to bottom"
       scroll_to_new_messages: "See new messages"
+      new_messages:
+        one: "%{count} new message"
+        other: "%{count} new messages"
       sound:
         title: "Desktop chat notification sound"
       sounds:

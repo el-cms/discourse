@@ -3,30 +3,43 @@ import { tracked } from "@glimmer/tracking";
 import { concat, hash } from "@ember/helper";
 import { on } from "@ember/modifier";
 import { action } from "@ember/object";
+import didInsert from "@ember/render-modifiers/modifiers/did-insert";
+import didUpdate from "@ember/render-modifiers/modifiers/did-update";
+import willDestroy from "@ember/render-modifiers/modifiers/will-destroy";
 import { service } from "@ember/service";
-import { htmlSafe } from "@ember/template";
+import { trustHTML } from "@ember/template";
+import DIconGridPicker from "discourse/components/d-icon-grid-picker";
+import DecoratedHtml from "discourse/components/decorated-html";
 import EmojiPicker from "discourse/components/emoji-picker";
 import DTooltip from "discourse/float-kit/components/d-tooltip";
 import categoryBadge from "discourse/helpers/category-badge";
 import concatClass from "discourse/helpers/concat-class";
 import icon from "discourse/helpers/d-icon";
+import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { uniqueItemsFromArray } from "discourse/lib/array-tools";
 import { AUTO_GROUPS, CATEGORY_TEXT_COLORS } from "discourse/lib/constants";
 import getURL from "discourse/lib/get-url";
 import Category from "discourse/models/category";
+import Composer from "discourse/models/composer";
 import PermissionType from "discourse/models/permission-type";
 import CategoryChooser from "discourse/select-kit/components/category-chooser";
 import GroupChooser from "discourse/select-kit/components/group-chooser";
-import IconPicker from "discourse/select-kit/components/icon-picker";
 import { eq, or } from "discourse/truth-helpers";
 import { i18n } from "discourse-i18n";
 
 export default class UpsertCategoryGeneral extends Component {
+  @service appEvents;
   @service site;
   @service siteSettings;
+  @service toasts;
+  @service composer;
+  @service store;
 
-  @tracked categoryVisibilityState = null;
+  @tracked loadingDescription = false;
+  @tracked descriptionHtml = null;
+  @tracked descriptionExpanded = false;
+  @tracked descriptionOverflows = false;
 
   uncategorizedSiteSettingLink = getURL(
     "/admin/site_settings/category/all_results?filter=allow_uncategorized_topics"
@@ -37,6 +50,96 @@ export default class UpsertCategoryGeneral extends Component {
   );
 
   #previousPermissions = null;
+
+  @action
+  registerDescriptionListener() {
+    this.appEvents.on("composer:edited-post", this, this._refreshDescription);
+  }
+
+  @action
+  unregisterDescriptionListener() {
+    this.appEvents.off("composer:edited-post", this, this._refreshDescription);
+  }
+
+  @action
+  checkDescriptionOverflow(element) {
+    if (!this.descriptionExpanded) {
+      this.descriptionOverflows = element.scrollHeight > element.clientHeight;
+    }
+  }
+
+  @action
+  toggleDescriptionExpanded() {
+    this.descriptionExpanded = !this.descriptionExpanded;
+  }
+
+  async _refreshDescription() {
+    const category = this.args.category;
+    if (!category?.id) {
+      return;
+    }
+
+    const result = await Category.reloadById(category.id);
+    if (result?.category?.description) {
+      category.set("description", result.category.description);
+      this.descriptionHtml = result.category.description;
+
+      this.toasts.success({
+        duration: "short",
+        data: {
+          message: i18n("category.description_updated"),
+        },
+      });
+    }
+  }
+
+  get showDescription() {
+    const category = this.args.category;
+    return (
+      !category.isUncategorizedCategory && category.id && category.topic_url
+    );
+  }
+
+  get categoryDescription() {
+    const description = this.descriptionHtml ?? this.args.category.description;
+    if (description) {
+      return trustHTML(description);
+    }
+
+    return trustHTML(i18n("category.no_description"));
+  }
+
+  @action
+  async editCategoryDescription() {
+    this.loadingDescription = true;
+
+    try {
+      const topicData = await ajax(`${this.args.category.topic_url}.json`);
+      const firstPost = topicData.post_stream?.posts?.[0];
+      if (!firstPost) {
+        return;
+      }
+
+      this.composer.close();
+
+      const post = this.store.createRecord("post", firstPost);
+      const topic = this.store.createRecord("topic", topicData);
+      post.set("topic", topic);
+
+      await this.composer.open({
+        post,
+        topic,
+        action: Composer.EDIT,
+        draftKey: topicData.draft_key || `topic_${topicData.id}`,
+        draftSequence: topicData.draft_sequence ?? 0,
+        skipJumpOnSave: true,
+      });
+    } catch (e) {
+      popupAjaxError(e);
+    } finally {
+      this.loadingDescription = false;
+    }
+  }
 
   // This needs to be dynamic because the name of the everyone group can be changed by admins
   get #everyoneFullPermission() {
@@ -94,6 +197,10 @@ export default class UpsertCategoryGeneral extends Component {
 
     const parentId = this.args.transientData.parent_category_id;
     const parentCategory = Category.findById(parentId);
+    if (!parentCategory?.permissions) {
+      return groups;
+    }
+
     const parentGroupIds = new Set(
       parentCategory.permissions.map((p) => p.group_id)
     );
@@ -103,7 +210,17 @@ export default class UpsertCategoryGeneral extends Component {
 
   @action
   onChangeAccessGroups(groupIds) {
+    const existingPermissions = this.permissions || [];
+
     const newPermissions = groupIds.map((groupId) => {
+      const existingPermission = existingPermissions.find(
+        (p) => p.group_id === groupId
+      );
+
+      if (existingPermission) {
+        return existingPermission;
+      }
+
       return {
         group_id: groupId,
         group_name: this.site.groupsById[groupId]?.name,
@@ -147,9 +264,9 @@ export default class UpsertCategoryGeneral extends Component {
   }
 
   get categoryVisibility() {
-    const state = this.categoryVisibilityState;
-    if (state && state.categoryId === this.args.category.id) {
-      return state.value;
+    const visibility = this.args.transientData?.visibility;
+    if (visibility) {
+      return visibility;
     }
 
     if (this.isParentRestricted) {
@@ -173,7 +290,7 @@ export default class UpsertCategoryGeneral extends Component {
     const key = this.isParentRestricted
       ? "category.visibility.inherited_from_parent"
       : "category.visibility.more_options_hint";
-    return htmlSafe(i18n(key));
+    return trustHTML(i18n(key));
   }
 
   @action
@@ -196,27 +313,67 @@ export default class UpsertCategoryGeneral extends Component {
       }));
     }
 
-    this.categoryVisibilityState = {
-      categoryId: this.args.category.id,
-      value,
-    };
+    this.args.form.set("visibility", value);
 
     if (value === "public") {
       this.#setFormPermissions([this.#everyoneFullPermission]);
     } else if (value === "group_restricted") {
       if (this.#previousPermissions?.length) {
         this.#setFormPermissions(this.#previousPermissions);
+        this.#previousPermissions = null;
       } else {
         this.#setFormPermissions([]);
       }
     }
   }
 
+  get #currentPermissionsArePrivate() {
+    const currentPermissions = this.permissions || [];
+    return (
+      currentPermissions.length > 0 &&
+      !currentPermissions.some((p) => p.group_id === AUTO_GROUPS.everyone.id)
+    );
+  }
+
+  get #isEditingExistingCategory() {
+    return Boolean(this.args.category.id);
+  }
+
+  #parentPermissionsAllowEveryone(parentPermissions) {
+    return parentPermissions.some(
+      (p) => p.group_id === AUTO_GROUPS.everyone.id
+    );
+  }
+
+  #currentPermissionsAreSubsetOf(parentPermissions) {
+    const parentGroupIds = new Set(parentPermissions.map((p) => p.group_id));
+    return (this.permissions || []).every((p) =>
+      parentGroupIds.has(p.group_id)
+    );
+  }
+
+  #shouldRetainPermissionsForParent(parentPermissions) {
+    if (!this.#isEditingExistingCategory) {
+      return false;
+    }
+
+    if (this.#parentPermissionsAllowEveryone(parentPermissions)) {
+      return true;
+    }
+
+    return (
+      this.#currentPermissionsArePrivate &&
+      this.#currentPermissionsAreSubsetOf(parentPermissions)
+    );
+  }
+
   @action
   async onParentCategoryChange(parentCategoryId) {
     if (!parentCategoryId) {
-      this.categoryVisibilityState = null;
-      this.#setFormPermissions([this.#everyoneFullPermission]);
+      this.args.form.set("visibility", null);
+      if (!this.#isEditingExistingCategory) {
+        this.#setFormPermissions([this.#everyoneFullPermission]);
+      }
       return;
     }
 
@@ -224,25 +381,32 @@ export default class UpsertCategoryGeneral extends Component {
       const result = await Category.reloadById(parentCategoryId);
       const parentCategory = this.site.updateCategory(result.category);
       parentCategory.setupGroupsAndPermissions();
+      const parentPermissions = parentCategory?.permissions;
 
-      if (parentCategory?.permissions?.length > 0) {
-        const hasEveryone = parentCategory.permissions.some(
-          (p) => p.group_id === AUTO_GROUPS.everyone.id
-        );
+      if (parentPermissions?.length > 0) {
+        const parentIsPublic =
+          this.#parentPermissionsAllowEveryone(parentPermissions);
 
-        if (!hasEveryone) {
-          this.categoryVisibilityState = null;
-
-          const newPermissions = parentCategory.permissions.map((p) => ({
-            group_name: p.group_name,
-            group_id: p.group_id,
-            permission_type: p.permission_type,
-          }));
-
-          this.#setFormPermissions(newPermissions);
-        } else {
-          this.#setFormPermissions([this.#everyoneFullPermission]);
+        if (!parentIsPublic) {
+          this.args.form.set("visibility", null);
         }
+
+        if (this.#shouldRetainPermissionsForParent(parentPermissions)) {
+          return;
+        }
+
+        if (parentIsPublic) {
+          this.#setFormPermissions([this.#everyoneFullPermission]);
+          return;
+        }
+
+        const newPermissions = parentPermissions.map((p) => ({
+          group_name: p.group_name,
+          group_id: p.group_id,
+          permission_type: p.permission_type,
+        }));
+
+        this.#setFormPermissions(newPermissions);
       }
     } catch (error) {
       popupAjaxError(error);
@@ -333,7 +497,7 @@ export default class UpsertCategoryGeneral extends Component {
     >
       {{#if this.showWarning}}
         <@form.Alert @type="warning" @icon="triangle-exclamation">
-          {{htmlSafe
+          {{trustHTML
             (i18n
               "category.uncategorized_general_warning"
               settingLink=this.uncategorizedSiteSettingLink
@@ -347,11 +511,12 @@ export default class UpsertCategoryGeneral extends Component {
         <@form.Field
           @name="name"
           @title={{i18n "category.name"}}
-          @format="large"
+          @format="max"
           @validation="required"
+          @type="input"
           as |field|
         >
-          <field.Input
+          <field.Control
             placeholder={{i18n "category.name_placeholder"}}
             @maxlength="50"
             class="category-name"
@@ -363,12 +528,13 @@ export default class UpsertCategoryGeneral extends Component {
       <@form.Field
         @name="color"
         @title={{i18n "category.background_color"}}
-        @format="large"
+        @format="max"
         @validation="required"
         @onSet={{this.onBackgroundColorSet}}
+        @type="color"
         as |field|
       >
-        <field.Color
+        <field.Control
           @colors={{this.backgroundColors}}
           @usedColors={{this.usedBackgroundColors}}
           @collapseSwatches={{true}}
@@ -380,10 +546,11 @@ export default class UpsertCategoryGeneral extends Component {
       <@form.Field
         @name="style_type"
         @title={{i18n "category.style"}}
-        @format="large"
+        @format="max"
+        @type="custom"
         as |styleField|
       >
-        <styleField.Custom>
+        <styleField.Control>
           <@form.ConditionalContent
             @activeName={{or styleField.value @category.styleType "square"}}
             @onChange={{this.onStyleTypeChange}}
@@ -407,28 +574,19 @@ export default class UpsertCategoryGeneral extends Component {
                   @name="icon"
                   @title={{i18n "category.icon"}}
                   @showTitle={{false}}
-                  @format="large"
+                  @format="max"
                   @validate={{this.validateIcon}}
+                  @type="custom"
                   as |field|
                 >
-                  <field.Custom>
-                    <IconPicker
-                      @value={{readonly field.value}}
-                      @onlyAvailable={{true}}
-                      @options={{hash
-                        maximum=1
-                        disabled=field.disabled
-                        caretDownIcon="angle-down"
-                        caretUpIcon="angle-up"
-                        icons=field.value
-                      }}
+                  <field.Control>
+                    <DIconGridPicker
+                      @value={{field.value}}
                       @onChange={{field.set}}
-                      class="form-kit__control-icon"
-                      style={{htmlSafe
-                        (concat "--icon-color: #" @transientData.color ";")
-                      }}
+                      @allowClear={{true}}
+                      @iconColor={{concat "#" @transientData.color}}
                     />
-                  </field.Custom>
+                  </field.Control>
                 </@form.Field>
               </Content>
 
@@ -437,11 +595,12 @@ export default class UpsertCategoryGeneral extends Component {
                   @name="emoji"
                   @title={{i18n "category.emoji"}}
                   @showTitle={{false}}
-                  @format="large"
+                  @format="max"
                   @validate={{this.validateEmoji}}
+                  @type="custom"
                   as |field|
                 >
-                  <field.Custom>
+                  <field.Control>
                     <EmojiPicker
                       @emoji={{field.value}}
                       @didSelectEmoji={{field.set}}
@@ -452,12 +611,12 @@ export default class UpsertCategoryGeneral extends Component {
                         (i18n "category.select_emoji")
                       }}
                     />
-                  </field.Custom>
+                  </field.Control>
                 </@form.Field>
               </Content>
 
               <Content @name="square">
-                {{htmlSafe
+                {{trustHTML
                   (categoryBadge
                     (this.buildTransientModel @transientData) styleType="square"
                   )
@@ -465,18 +624,77 @@ export default class UpsertCategoryGeneral extends Component {
               </Content>
             </cc.Contents>
           </@form.ConditionalContent>
-        </styleField.Custom>
+        </styleField.Control>
       </@form.Field>
+
+      {{#if this.showDescription}}
+        <div
+          {{didInsert this.registerDescriptionListener}}
+          {{willDestroy this.unregisterDescriptionListener}}
+        >
+          <@form.Container
+            @title={{i18n "category.description"}}
+            class="edit-category-description-container"
+          >
+            <div
+              class={{concatClass
+                "description-content"
+                (unless this.descriptionExpanded "--collapsed")
+                (if this.descriptionOverflows "--overflowing")
+              }}
+              {{didInsert this.checkDescriptionOverflow}}
+              {{didUpdate
+                this.checkDescriptionOverflow
+                this.categoryDescription
+              }}
+            >
+              <DecoratedHtml
+                @html={{this.categoryDescription}}
+                @className="readonly-field"
+              />
+            </div>
+
+            <div class="description-actions">
+              {{#if @category.topic_url}}
+                <@form.Button
+                  @action={{this.editCategoryDescription}}
+                  @icon="pencil"
+                  @label="edit"
+                  @isLoading={{this.loadingDescription}}
+                  class="btn-default btn-small edit-category-description"
+                />
+              {{/if}}
+              {{#if this.descriptionOverflows}}
+                <@form.Button
+                  @action={{this.toggleDescriptionExpanded}}
+                  @label={{if
+                    this.descriptionExpanded
+                    "category.description_collapse"
+                    "category.description_expand"
+                  }}
+                  @icon={{if
+                    this.descriptionExpanded
+                    "chevron-up"
+                    "chevron-down"
+                  }}
+                  class="btn-flat btn-small toggle-description"
+                />
+              {{/if}}
+            </div>
+          </@form.Container>
+        </div>
+      {{/if}}
 
       {{#unless @category.isUncategorizedCategory}}
         <@form.Field
           @name="parent_category_id"
           @title={{i18n "category.subcategory_of"}}
-          @format="large"
+          @format="max"
           @onSet={{this.onParentCategorySet}}
+          @type="custom"
           as |field|
         >
-          <field.Custom>
+          <field.Control>
             <CategoryChooser
               @value={{@transientData.parent_category_id}}
               @onChange={{field.set}}
@@ -492,14 +710,14 @@ export default class UpsertCategoryGeneral extends Component {
                 displayCategoryDescription=false
               }}
             />
-          </field.Custom>
+          </field.Control>
         </@form.Field>
       {{/unless}}
 
       <@form.Container
         @title={{i18n "category.visibility.title"}}
         class="--radio-cards"
-        @format="large"
+        @format="max"
       >
         <@form.ConditionalContent
           @activeName={{this.categoryVisibility}}
@@ -534,7 +752,7 @@ export default class UpsertCategoryGeneral extends Component {
             <Content @name="group_restricted">
               <@form.Container
                 @title={{i18n "category.visibility.which_groups_can_access"}}
-                @format="large"
+                @format="max"
               >
                 <GroupChooser
                   @content={{this.availableAccessGroups}}
@@ -542,15 +760,14 @@ export default class UpsertCategoryGeneral extends Component {
                   @onChange={{this.onChangeAccessGroups}}
                   @options={{hash disabled=this.isParentRestricted}}
                 />
+                {{! template-lint-disable no-invalid-interactive }}
+                <span
+                  class="category-permission-hint"
+                  {{on "click" this.goToSecurityTab}}
+                >
+                  {{this.permissionHint}}
+                </span>
               </@form.Container>
-
-              {{! template-lint-disable no-invalid-interactive }}
-              <span
-                class="category-permission-hint"
-                {{on "click" this.goToSecurityTab}}
-              >
-                {{this.permissionHint}}
-              </span>
             </Content>
           </cc.Contents>
         </@form.ConditionalContent>

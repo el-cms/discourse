@@ -1,38 +1,39 @@
 /* eslint-disable ember/no-classic-components, ember/no-jquery, ember/no-observers */
 import Component from "@ember/component";
-import { fn, hash } from "@ember/helper";
-import { action } from "@ember/object";
+import { fn } from "@ember/helper";
+import { action, computed } from "@ember/object";
 import { tagName } from "@ember-decorators/component";
 import { observes, on } from "@ember-decorators/object";
 import $ from "jquery";
 import AvatarFlair from "discourse/components/avatar-flair";
+import DIconGridPicker from "discourse/components/d-icon-grid-picker";
 import RadioButton from "discourse/components/radio-button";
 import TextField from "discourse/components/text-field";
 import UppyImageUploader from "discourse/components/uppy-image-uploader";
 import { ajax } from "discourse/lib/ajax";
 import discourseDebounce from "discourse/lib/debounce";
-import discourseComputed from "discourse/lib/decorators";
 import getURL from "discourse/lib/get-url";
 import { convertIconClass } from "discourse/lib/icon-library";
-import IconPicker from "discourse/select-kit/components/icon-picker";
 import { or } from "discourse/truth-helpers";
 import { i18n } from "discourse-i18n";
 
 @tagName("")
 export default class GroupFlairInputs extends Component {
-  @discourseComputed
-  demoAvatarUrl() {
+  @computed
+  get demoAvatarUrl() {
     return getURL("/images/avatar.png");
   }
 
-  @discourseComputed("model.flair_type")
-  flairPreviewIcon(flairType) {
-    return flairType && flairType === "icon";
+  @computed("model.flair_type")
+  get flairPreviewIcon() {
+    return this.model?.flair_type && this.model?.flair_type === "icon";
   }
 
-  @discourseComputed("model.flair_icon")
-  flairPreviewIconUrl(flairIcon) {
-    return flairIcon ? convertIconClass(flairIcon) : "";
+  @computed("model.flair_icon")
+  get flairPreviewIconUrl() {
+    return this.model?.flair_icon
+      ? convertIconClass(this.model?.flair_icon)
+      : "";
   }
 
   @on("didInsertElement")
@@ -70,19 +71,21 @@ export default class GroupFlairInputs extends Component {
     }
   }
 
-  @discourseComputed("model.flair_type")
-  flairPreviewImage(flairType) {
-    return flairType && flairType === "image";
+  @computed("model.flair_type")
+  get flairPreviewImage() {
+    return this.model?.flair_type && this.model?.flair_type === "image";
   }
 
-  @discourseComputed("model.flair_url")
-  flairImageUrl(flairUrl) {
-    return flairUrl && flairUrl.includes("/") ? flairUrl : null;
+  @computed("model.flair_url")
+  get flairImageUrl() {
+    return this.model?.flair_url && this.model?.flair_url?.includes("/")
+      ? this.model?.flair_url
+      : null;
   }
 
-  @discourseComputed("flairPreviewImage")
-  flairPreviewLabel(flairPreviewImage) {
-    const key = flairPreviewImage ? "image" : "icon";
+  @computed("flairPreviewImage")
+  get flairPreviewLabel() {
+    const key = this.flairPreviewImage ? "image" : "icon";
     return i18n(`groups.flair_preview_${key}`);
   }
 
@@ -132,11 +135,11 @@ export default class GroupFlairInputs extends Component {
         </div>
 
         {{#if this.flairPreviewIcon}}
-          <IconPicker
-            @name="icon"
+          <DIconGridPicker
             @value={{this.model.flair_icon}}
-            @options={{hash maximum=1}}
             @onChange={{fn (mut this.model.flair_icon)}}
+            @showCaret={{true}}
+            @label={{unless this.model.flair_icon (i18n "select_placeholder")}}
           />
         {{else if this.flairPreviewImage}}
           <UppyImageUploader

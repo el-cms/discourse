@@ -2,11 +2,12 @@
 
 RSpec.describe UpcomingChanges::List do
   describe ".call" do
-    subject(:result) { described_class.call(params:, **dependencies) }
+    subject(:result) { described_class.call(params:, options:, **dependencies) }
 
     fab!(:admin)
     let(:dependencies) { { guardian: } }
     let(:guardian) { admin.guardian }
+    let(:options) { {} }
     let(:params) { {} }
 
     before do
@@ -17,6 +18,12 @@ RSpec.describe UpcomingChanges::List do
             status: :experimental,
             impact_type: "other",
             impact_role: "developers",
+          },
+          allow_user_locale: {
+            impact: "feature,all_members",
+            status: :beta,
+            impact_type: "feature",
+            impact_role: "all_members",
           },
         },
       )
@@ -82,6 +89,35 @@ RSpec.describe UpcomingChanges::List do
         expect(mock_setting[:groups]).to eq("trust_level_0,trust_level_1")
       end
 
+      describe "related setting" do
+        context "when an upcoming_change_default_override points to the change" do
+          before do
+            mock_upcoming_change_default_overrides(
+              {
+                suggested_topics_max_days_old: {
+                  upcoming_change: :enable_upload_debug_mode,
+                  new_default: 1000,
+                },
+              },
+            )
+          end
+
+          after { clear_mocked_upcoming_change_default_overrides }
+
+          it "includes the related setting name" do
+            results = result.upcoming_changes
+            mock_setting = results.find { |change| change[:setting] == :enable_upload_debug_mode }
+            expect(mock_setting[:related]).to eq(:suggested_topics_max_days_old)
+          end
+        end
+
+        it "returns nil for related when no upcoming_change_default_override points to the change" do
+          results = result.upcoming_changes
+          mock_setting = results.find { |change| change[:setting] == :allow_user_locale }
+          expect(mock_setting[:related]).to be_nil
+        end
+      end
+
       describe "enabled_for logic" do
         it "sets enabled_for to 'no_one' when setting value is false" do
           SiteSetting.enable_upload_debug_mode = false
@@ -128,6 +164,41 @@ RSpec.describe UpcomingChanges::List do
           mock_setting = results.find { |change| change[:setting] == :enable_upload_debug_mode }
 
           expect(mock_setting[:upcoming_change][:enabled_for]).to eq("groups")
+        end
+
+        context "when the staff group has been localized" do
+          before do
+            SiteSetting.default_locale = "de"
+            Group.refresh_automatic_group!(:staff)
+          end
+
+          it "sets enabled_for to the localized staff group name when setting value is true and group is staff" do
+            SiteSetting.enable_upload_debug_mode = true
+            SiteSettingGroup.create!(
+              name: "enable_upload_debug_mode",
+              group_ids: Group::AUTO_GROUPS[:staff].to_s,
+            )
+            SiteSetting.refresh_site_setting_group_ids!
+            SiteSetting.notify_changed!
+
+            results = result.upcoming_changes
+            setting = results.find { |change| change[:setting] == :enable_upload_debug_mode }
+            expect(setting[:upcoming_change][:enabled_for]).to eq(
+              Group.find(Group::AUTO_GROUPS[:staff]).name,
+            )
+          end
+        end
+
+        context "when filtering by statuses" do
+          let(:options) { { filter_statuses: [:beta] } }
+
+          it "only includes upcoming changes with the given statuses" do
+            results = result.upcoming_changes
+            expect(
+              results.find { |change| change[:setting] == :enable_upload_debug_mode },
+            ).not_to be_present
+            expect(results.find { |change| change[:setting] == :allow_user_locale }).to be_present
+          end
         end
       end
 

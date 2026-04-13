@@ -12,9 +12,18 @@ module PageObjects
         self
       end
 
-      def select_bundled_action(reviewable, value)
+      def select_bundled_action(reviewable, value, bundle_index: nil)
         within(reviewable_by_id(reviewable.id)) do
-          reviewable_action_dropdown.select_row_by_value(value)
+          if bundle_index
+            dropdown =
+              PageObjects::Components::SelectKit.new(
+                "#{REVIEWABLE_ACTION_DROPDOWN}:nth-of-type(#{bundle_index})",
+              )
+            dropdown.expand
+            dropdown.select_row_by_name(value)
+          else
+            reviewable_action_dropdown.select_row_by_value(value)
+          end
         end
       end
 
@@ -153,22 +162,20 @@ module PageObjects
       end
 
       def has_history_items?(count:)
-        expect(page).to have_css(".timeline-event", count: count)
+        page.has_css?(".timeline-event", count: count)
       end
 
       def has_claimed_history_item?(user)
-        expect(page).to have_css(".timeline-event__icon .d-icon-user-plus")
-        expect(page).to have_text("Claimed by")
+        page.has_css?(".timeline-event__icon .d-icon-user-plus") && page.has_text?("Claimed by")
       end
 
       def has_unclaimed_history_item?(user)
-        expect(page).to have_css(".timeline-event__icon .d-icon-user-xmark")
-        expect(page).to have_text("Unclaimed by")
+        page.has_css?(".timeline-event__icon .d-icon-user-xmark") && page.has_text?("Unclaimed by")
       end
 
       def has_created_at_history_item?
-        expect(page).to have_css(".timeline-event__icon .d-icon-pen-to-square")
-        expect(page).to have_text("Post created by")
+        page.has_css?(".timeline-event__icon .d-icon-pen-to-square") &&
+          page.has_text?("Post created by")
       end
 
       def click_timeline_tab
@@ -223,6 +230,10 @@ module PageObjects
 
       def has_ip_lookup_info?
         page.has_css?(".reviewable-ip-lookup")
+      end
+
+      def has_no_ip_lookup_info?
+        page.has_no_css?(".reviewable-ip-lookup")
       end
 
       def has_ip_location?(location)

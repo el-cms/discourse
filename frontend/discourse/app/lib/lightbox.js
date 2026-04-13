@@ -1,3 +1,4 @@
+import { waitForPromise } from "@ember/test-waiters";
 import { isRailsTesting, isTesting } from "discourse/lib/environment";
 import { helperContext } from "discourse/lib/helpers";
 import { SELECTORS } from "discourse/lib/lightbox/constants";
@@ -19,10 +20,12 @@ export default function lightbox(elem, additionalData = {}) {
     return INIT_PROMISES.get(elem);
   }
 
-  const promise = initLightbox(elem, additionalData).catch((error) => {
-    INIT_PROMISES.delete(elem);
-    throw error;
-  });
+  const promise = waitForPromise(initLightbox(elem, additionalData)).catch(
+    (error) => {
+      INIT_PROMISES.delete(elem);
+      throw error;
+    }
+  );
 
   INIT_PROMISES.set(elem, promise);
   return promise;
@@ -33,7 +36,9 @@ async function initLightbox(elem, additionalData = {}) {
   const siteSettings = helperContext().siteSettings;
   const caps = helperContext().capabilities;
 
-  const { default: PhotoSwipeLightbox } = await import("photoswipe/lightbox");
+  const { default: PhotoSwipeLightbox } = await waitForPromise(
+    import("photoswipe/lightbox")
+  );
   const isTestEnv = isTesting() || isRailsTesting();
   const canDownload =
     !siteSettings.prevent_anons_from_downloading_files || !!currentUser;
@@ -65,7 +70,7 @@ async function initLightbox(elem, additionalData = {}) {
     escKey: false,
     tapAction,
     paddingFn,
-    pswpModule: async () => await import("photoswipe"),
+    pswpModule: async () => await waitForPromise(import("photoswipe")),
     appendToEl: isTesting() && document.getElementById("ember-testing"),
   });
 

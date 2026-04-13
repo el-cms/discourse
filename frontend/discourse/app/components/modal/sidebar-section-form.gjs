@@ -19,14 +19,14 @@ import { removeValueFromArray } from "discourse/lib/array-tools";
 import { SIDEBAR_SECTION, SIDEBAR_URL } from "discourse/lib/constants";
 import { afterRender, bind } from "discourse/lib/decorators";
 import { sanitize } from "discourse/lib/text";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import { and, not } from "discourse/truth-helpers";
 import { i18n } from "discourse-i18n";
 
 class Section {
   @tracked title;
-  @trackedArray links;
-  @trackedArray secondaryLinks;
+  @autoTrackedArray links;
+  @autoTrackedArray secondaryLinks;
 
   constructor({
     title,
@@ -394,7 +394,7 @@ export default class SidebarSectionForm extends Component {
   @afterRender
   focusNewRowInput(id) {
     document
-      .querySelector(`[data-row-id="${id}"] .icon-picker summary`)
+      .querySelector(`[data-row-id="${id}"] .d-icon-grid-picker-trigger`)
       .focus();
   }
 

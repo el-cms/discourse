@@ -2,8 +2,7 @@ import Component from "@glimmer/component";
 import { tracked } from "@glimmer/tracking";
 import { fn, hash } from "@ember/helper";
 import { on } from "@ember/modifier";
-import { action } from "@ember/object";
-import { gt, readOnly } from "@ember/object/computed";
+import { action, computed } from "@ember/object";
 import didInsert from "@ember/render-modifiers/modifiers/did-insert";
 import didUpdate from "@ember/render-modifiers/modifiers/did-update";
 import willDestroy from "@ember/render-modifiers/modifiers/will-destroy";
@@ -16,7 +15,7 @@ import LoadMore from "discourse/components/load-more";
 import { ajax } from "discourse/lib/ajax";
 import { popupAjaxError } from "discourse/lib/ajax-error";
 import { bind } from "discourse/lib/decorators";
-import { trackedArray } from "discourse/lib/tracked-tools";
+import { autoTrackedArray } from "discourse/lib/tracked-tools";
 import ComboBox from "discourse/select-kit/components/combo-box";
 import { not } from "discourse/truth-helpers";
 import { i18n } from "discourse-i18n";
@@ -29,14 +28,21 @@ export default class WebhookEvents extends Component {
   @tracked events = [];
   @tracked pingEnabled = true;
   @tracked redeliverEnabled = true;
-  @trackedArray incomingEventIds = [];
-
-  @readOnly("incomingEventIds.length") incomingCount;
-  @gt("incomingCount", 0) hasIncoming;
+  @autoTrackedArray incomingEventIds = [];
 
   constructor() {
     super(...arguments);
     this.loadEvents();
+  }
+
+  @computed("incomingEventIds.length")
+  get incomingCount() {
+    return this.incomingEventIds?.length;
+  }
+
+  @computed("incomingCount")
+  get hasIncoming() {
+    return this.incomingCount > 0;
   }
 
   async loadEvents() {
